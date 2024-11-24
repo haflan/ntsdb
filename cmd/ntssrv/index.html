@@ -1,0 +1,310 @@
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Note To Self</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+            }
+            .sidebar {
+                height: 100%;
+                width: 250px;
+                position: fixed;
+                left: 0;
+                top: 0;
+                background-color: #111;
+                display: none;
+                z-index: 1;
+                overflow: scroll;
+            }
+            .sidebar a {
+                padding: 10px 15px;
+                text-decoration: none;
+                font-size: 18px;
+                color: #818181;
+                display: block;
+            }
+            .sidebar a:hover {
+                color: #f1f1f1;
+            }
+            .menu-btn {
+                font-size: 24px;
+                display: none;
+                cursor: pointer;
+                background: none;
+                border: none;
+                color: #111;
+            }
+            .content {
+                margin-left: 0;
+            }
+            .group-header {
+                border-top: 1px solid black;
+                border-bottom: 1px solid black;
+                font-size: 1.2em;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 5px;
+            }
+            .note-header {
+                border-top: 1px solid black;
+                font-size: 1em;
+                display: flex;
+                justify-content: flex-end;
+                align-items: center;
+                padding: 5px;
+                border: none;
+            }
+            .note-header::before {
+                content: '';
+                flex-grow: 1;
+                border-bottom: 1px solid #ddd;
+                margin-right: 10px; /* Adjust margin as needed */
+            }
+
+            .note-timestamp {
+                font-size: 15px;
+            }
+            .note-contents {
+                padding: 15px;
+                white-space: pre-wrap;
+                overflow-x: scroll;
+            }
+            .note-contents.fade {
+                overflow-y: hidden;
+                max-height: 200px;
+                position: relative;
+            }
+            .note-contents.fade::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 200px; /* Height of the fade effect */
+                background: linear-gradient(to bottom, rgba(255, 255, 255, 0), white);
+                pointer-events: none; /* Allow interactions below */
+            }
+
+            @media screen and (min-width: 768px) {
+                .sidebar {
+                    display: block;
+                }
+                .content {
+                    margin-left: 250px;
+                }
+            }
+            @media screen and (max-width: 767px) {
+                .menu-btn {
+                    display: block;
+                    position: fixed;
+                    top: 10px;
+                    right: 10px;
+                }
+                .sidebar {
+                    width: 100%;
+                    height: 100%;
+                    display: block;
+                    top: 0;
+                    left: 0;
+                    background-color: rgba(0, 0, 0, 0.9);
+                    z-index: 1;
+                    transform: translateX(-100%);
+                }
+                .sidebar.open {
+                    transform: translateX(0);
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <button
+            class="menu-btn" onclick="toggleMenu()"
+            style="z-index: 20;"
+        >
+            ☰
+        </button>
+        <div class="sidebar" id="sidebar"></div>
+        <div class="content"></div>
+        <script>
+
+            /* Utils */
+            const Unit = {
+                Millisecond : {V: 1, S: 'millisecond'},
+                Second      : {V: 1000, S: 'second'},
+                Minute      : {V: 1000 * 60, S: 'minute'},
+                Hour        : {V: 1000 * 60 * 60, S: 'hour'},
+                Day         : {V: 1000 * 60 * 60 * 24, S: 'day'},
+                Week        : {V: 1000 * 60 * 60 * 24 * 7, S: 'week'},
+                Month       : {V: 1000 * 60 * 60 * 24 * 30, S: 'month'},
+                Year        : {V:  1000 * 60 * 60 * 24 * 365, S: 'year'},
+            }
+
+            function dateToUnitOffset(date) {
+                const deltaTime = Date.now() - date.getTime()
+
+                const units = [
+                    Unit.Year, Unit.Month, Unit.Week, Unit.Day,
+                    Unit.Hour, Unit.Minute, Unit.Second, Unit.Millisecond,
+                ]
+
+                for (let unit of units) {
+                    const numUnits = deltaTime / unit.V
+                    if (Math.abs(numUnits) >= 1) {
+                        const offset = Math.floor(numUnits)
+                        return `${offset} ${unit.S}` + (offset > 1 ? 's' : '') + ' ago'
+                    }
+                }
+
+                return 'just now'
+            }
+
+
+            function groupColor(g) {
+                if (g.Image.Valid && g.Image.String.startsWith("#")) {
+                    return "#" + g.Image.String.substr(3);
+                }
+
+                // Images aren't supported. Create a color from the string hash instead.
+                let hash = 0;
+                for (let i = 0; i < g.Title.length; i++) {
+                    hash = g.Title.charCodeAt(i) + ((hash << 5) - hash);
+                }
+                // Convert hash to a color
+                let color = '#';
+                for (let i = 0; i < 3; i++) {
+                    const value = (hash >> (i * 8)) & 0xFF;
+                    color += ('00' + value.toString(16)).slice(-2);
+                }
+                return color;
+            }
+
+            function toggleMenu() {
+                const sidebar = document.getElementById('sidebar');
+                const menuBtn = document.querySelector('.menu-btn');
+                sidebar.classList.toggle('open');
+                menuBtn.style.color = sidebar.classList.contains('open') ? 'white' : 'black';
+            }
+
+            async function reload() {
+                try {
+                    const pG = fetch('/groups').then(r => r.json()).then(groups => {
+                        window.GROUPS = {}
+                        for (const g of groups) {
+                            window.GROUPS[g.UUID] = g
+                        }
+                    })
+                    const pN = fetch('/notes').then(r => r.json())
+                        .then(notes => window.NOTES =  notes)
+                    await Promise.all([pG, pN])
+                    showNotes()
+                    showGroups()
+                } catch (e) {
+                    console.error(e)
+                    alert('Failed to load notes index: ' + e.Message)
+                }
+            }
+
+            async function showGroups() {
+                const sidebar = document.querySelector('#sidebar')
+                sidebar.innerHTML = '<a href="#" style="color: white">All</a>'
+                for (const g of Object.values(window.GROUPS)) {
+                    sidebar.innerHTML += `<a 
+                        href="#${g.UUID}"
+                        style="color: ${groupColor(g)}">${g.Title}</a>`
+                }
+            }
+
+            function getGroup() {
+                const uuid = decodeURIComponent(location.hash.substring(1))
+                return window.GROUPS[uuid]
+            }
+
+            async function showNotes() {
+                const G = getGroup()
+                const content = document.querySelector('.content')
+                if (!G) {
+                    content.innerHTML = ''
+                    let prevGroup = ''
+                    for (const note of window.NOTES) {
+                        const g = window.GROUPS[note.GroupUUID]
+                        const dt = new Date(note.CreatedAt)
+                        if (g.UUID !== prevGroup) {
+                            content.innerHTML += `
+                                <a href="#${g.UUID}" style="text-decoration: none; color: black;">
+                                    <div class="group-header" style="background-color: ${groupColor(g)}">
+                                        ${g.Title}
+                                    </div>
+                                </a>
+                            `
+                            prevGroup = note.GroupUUID
+                        }
+                        content.innerHTML += `<div class="note">
+                            <div class="note-header">
+                                <span class="note-timestamp" title="${dt.toISOString()}">${dateToUnitOffset(dt)}</span>
+                            </div>
+                            <div class="note-contents nt-${note.Type}">${note.Text.String}</div>
+                        </div>
+                        `
+                    }
+                } else {
+                    content.innerHTML = `
+                        <a href="#${G.UUID}" style="text-decoration: none; color: black;">
+                            <div class="group-header" style="background-color: ${groupColor(G)}">
+                                ${G.Title}
+                            </div>
+                        </a>
+                    `
+                    for (const note of window.NOTES.filter(n => n.GroupUUID === G.UUID)) {
+                        const dt = new Date(note.CreatedAt)
+                        content.innerHTML += `<div class="note">
+                            <div class="note-header" >
+                                <span class="note-timestamp" title="${dt.toISOString()}">
+                                    ${dateToUnitOffset(dt)}
+                                </span>
+                            </div>
+                            <div class="note-contents nt-${note.Type}">${note.Text.String}</div>
+                        </div>
+                        `
+                    }
+                }
+                // Quick fix to allow text selection without toggling fade
+                document.addEventListener('mousedown', () => window.MouseMoved = false)
+                document.addEventListener('mousemove', () => window.MouseMoved = true)
+                // Listen to clicks on notes to toggle fade unless the mouse moved
+                const noteContents = document.querySelectorAll('.note-contents')
+                noteContents.forEach((el) => {
+                    if (el.scrollHeight > 300) {
+                        el.classList.add('fade')
+                        el.addEventListener('click', function() {
+                            if (window.MouseMoved) {
+                                return
+                            }
+                            el.classList.toggle('fade')
+                        })
+                    }
+                })
+                // Unfade the latest
+                if (noteContents.length) {
+                    noteContents[noteContents.length-1].classList.remove('fade')
+                }
+                window.scrollTo(0, document.body.scrollHeight);
+            }
+
+            window.addEventListener('hashchange', function() {
+                showNotes()
+                if (sidebar.classList.contains('open')) {
+                    toggleMenu()
+                }
+            });
+
+            reload()
+        </script>
+    </body>
+    </html>
+
